@@ -57,6 +57,7 @@ MEMWATCH_MIN_GIB="${MEMWATCH_MIN_GIB:-6}"
 MEMWATCH_MIN_FREE_GIB="${MEMWATCH_MIN_FREE_GIB:-2}"
 MEMWATCH_FREE_GATE_GIB="${MEMWATCH_FREE_GATE_GIB:-10}"
 MEMWATCH_GRACE="${MEMWATCH_GRACE:-30}"
+MEMWATCH_CONSEC="${MEMWATCH_CONSEC:-5}"
 # Windows during which an adopted container (one the supervisor did not launch)
 # is treated as possibly still starting: do NOT probe. start.sh is the only
 # authority on readiness; the supervisor must not emergency-stop a container
@@ -396,6 +397,7 @@ while true; do
                 MEMWATCH_MIN_FREE_GIB="$MEMWATCH_MIN_FREE_GIB" \
                     MEMWATCH_FREE_GATE_GIB="$MEMWATCH_FREE_GATE_GIB" \
                     MEMWATCH_GRACE="$MEMWATCH_GRACE" \
+                    MEMWATCH_CONSEC="$MEMWATCH_CONSEC" \
                     bash "$REPO_DIR/scripts/start-memwatch.sh" "$CONTAINER_NAME" "$MEMWATCH_MIN_GIB" || true
             fi
             "$REPO_DIR/scripts/memwatch-rotate.sh" "$CONTAINER_NAME" || true
@@ -511,6 +513,7 @@ while true; do
         MEMWATCH_MIN_FREE_GIB="$MEMWATCH_MIN_FREE_GIB" \
             MEMWATCH_FREE_GATE_GIB="$MEMWATCH_FREE_GATE_GIB" \
             MEMWATCH_GRACE="$MEMWATCH_GRACE" \
+            MEMWATCH_CONSEC="$MEMWATCH_CONSEC" \
             bash "$REPO_DIR/scripts/start-memwatch.sh" "$CONTAINER_NAME" "$MEMWATCH_MIN_GIB" || true
     fi
     # memwatch log rotation (10 MB copy-truncate) every tick.
