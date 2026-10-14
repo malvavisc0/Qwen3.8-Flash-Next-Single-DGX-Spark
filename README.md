@@ -1,3 +1,10 @@
+# Use the TensorFold recipe
+
+> [!IMPORTANT]
+> # A new recipe is now live, and it runs faster on TensorFold. Everyone should use that.
+>
+> **[https://github.com/MiaAI-Lab/Qwen3.8-Flash-Next-Single-DGX-Spark-TensorFold](https://github.com/MiaAI-Lab/Qwen3.8-Flash-Next-Single-DGX-Spark-TensorFold)**
+
 <h1 align="center">Qwen3.8-Flash-Next on ONE DGX Spark (TP=1)</h1>
 
 <p align="center">
@@ -12,6 +19,8 @@ checkpoint (99 GiB) from a single DGX Spark's 121 GiB unified memory, via vLLM
 with the PLE table offloaded and memory-mapped. This is a **vision-language**
 model: text, images and video all work out of the box (see below). Nothing here depends on the
 2-node files it was derived from.
+
+**local-inference-lab** — the byte-identical Spark checkpoint used as the splice base.
 
 ```
 cp .env.sample .env        # edit IMAGE / HF_TOKEN if needed
@@ -1360,8 +1369,6 @@ sparkDash's own figures include any other traffic on the port.
   not a re-quantization.
 - **MiaAI Lab** — the single-DGX-Spark NVFP4 recipe and
   [`Mia-AiLab/Qwen3.8-Flash-Next-NVFP4`](https://huggingface.co/Mia-AiLab/Qwen3.8-Flash-Next-NVFP4).
-- **local-inference-lab** — the byte-identical Spark checkpoint used as the
-  splice base.
 - **Keys (drowzeys)** — the abliteration splice served by `ABLIT=1` (QSA
   `o_proj` at L15–47 in MXFP8; MTP, routed experts, PLE and the chat template
   left stock) and its packaging.
