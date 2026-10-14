@@ -17,7 +17,8 @@ MTP_ORIG = Path(os.environ.get("V030_MTP_ORIG", "/m/qwen-dual-wt/files/mtp_v030_
 
 LANE_ON = re.compile(r'"\$(V030|\{V030:-\})" == "true"')
 LANE_OFF = '"$V030" != "true"'
-LANE_TOKENS = ("v030_fp8kv", "v030_ple", "VLLM_PLE_MMAP_DIR", "index_share_for_mtp_iteration",
+LANE_TOKENS = ("v030_fp8kv", "v030_ple", "VLLM_PLE_MMAP_DIR", "VLLM_SPARSE_INDEXER_MAX_LOGITS_MB",
+               "index_share_for_mtp_iteration",
                "--kv-cache-memory-bytes", "--engram-config", "patch_ple_mmap_v030.py",
                "patch_mtp_draft_vocab_v030.py", "patch_qsa_fp8_kv_v030.py", "fi_autotune")
 DAY0_TOKENS = ("patch_ple_layer.py", "patch_modelopt_mxfp8.py", "patch_qsa_fp8_kv.py\"",
@@ -113,6 +114,15 @@ class StartGates(unittest.TestCase):
                        'V030: the determinism knobs', 'V030: the vLLM 0.30 lane serves only'):
             self.assertIn(needle, src)
 
+    def test_indexer_logits_cap_defaults_and_validates(self):
+        src = START.read_text()
+        self.assertIn('V030_INDEXER_LOGITS_MB="${V030_INDEXER_LOGITS_MB:-128}"', src)
+        self.assertIn('V030_INDEXER_LOGITS_MB must be a positive integer', src)
+        # The validation sits inside the V030 gate, so the default lane never sees it.
+        for i, (line, state) in enumerate(zip(self.lines, self.states), 1):
+            if 'V030_INDEXER_LOGITS_MB must be a positive integer' in line:
+                self.assertIs(state, True, f"start.sh:{i} validation outside the V030 gate")
+
 
 class RenderedCommand(unittest.TestCase):
     def render(self, template_body, lane):
@@ -136,6 +146,7 @@ class RenderedCommand(unittest.TestCase):
     def test_lane_command_swaps_overlays(self):
         out = self.render(self.current_template(), lane=True)
         for needle in ("VLLM_PLE_MMAP_DIR=/root/.cache/vllm/ple_mmap_v030", "VLLM_PLE_MMAP_ADVICE=1",
+                       "VLLM_SPARSE_INDEXER_MAX_LOGITS_MB=@V030_INDEXER_LOGITS_MB@",
                        "VLLM_FLASHINFER_AUTOTUNE_CACHE_DIR=/tmp/fi_autotune", "@V030_MOUNTS@"):
             self.assertIn(needle, out)
         for needle in ("VLLM_PLE_PACKED_TABLE_DIR", "@PATCHED_PLE@", "@OFFLOAD_DIR@", "@BLOCK_DROP_MOUNTS@"):
@@ -148,22 +159,43 @@ class LaunchWrapper(unittest.TestCase):
         for needle in ("export V030=true", "export IMAGE=vllm/vllm-openai:v0.30.0",
                        'TP1_MODEL_ID="${TP1_MODEL_ID:-nvidia/Qwen3.8-Flash-Next-NVFP4}"',
                        'KV_CACHE_DTYPE="${KV_CACHE_DTYPE:-fp8}"', 'PLE_GIB="${PLE_GIB:-47.68}"',
-                       'MEMWATCH_MIN_GIB="${MEMWATCH_MIN_GIB:-3}"', 'MEMWATCH_MIN_FREE_GIB="${MEMWATCH_MIN_FREE_GIB:-1}"',
                        'exec "$SCRIPT_DIR/start.sh"'):
             self.assertIn(needle, src)
+        # The memwatch floors and V030_KV_GIB moved into start.sh's V030 gate:
+        # an export here would ride through start.sh's env-vs-.env snapshot
+        # and override .env. (Comments may name them; exports must not.)
+        for needle in ("export MEMWATCH_MIN_GIB", "export MEMWATCH_MIN_FREE_GIB", "export V030_KV_GIB"):
+            self.assertNotIn(needle, src)
 
     def test_watchdog_floors_are_integers_below_the_soak_gate(self):
-        src = WRAPPER.read_text()
-        avail = int(re.search(r'MEMWATCH_MIN_GIB:-([^}]+)\}', src).group(1))
-        free = int(re.search(r'MEMWATCH_MIN_FREE_GIB:-([^}]+)\}', src).group(1))
-        self.assertLessEqual(avail, 3)
-        self.assertLess(free, 1.5)
+        # start.sh owns the lane floors (inside the V030 gate); the wrapper
+        # must not export them or they would override .env. The default lane's
+        # floors (6/2) are set outside the gate and are not under test here.
+        lines = START.read_text().splitlines()
+        states = lane_state_per_line(lines)
+        lane_avail = lane_free = None
+        for line, state in zip(lines, states):
+            m = re.search(r'MEMWATCH_MIN_GIB:-([^}]+)\}', line)
+            if m and state is True:
+                lane_avail = int(m.group(1))
+            m = re.search(r'MEMWATCH_MIN_FREE_GIB:-([^}]+)\}', line)
+            if m and state is True:
+                lane_free = int(m.group(1))
+        self.assertIsNotNone(lane_avail, "no MEMWATCH_MIN_GIB default inside the V030 gate")
+        self.assertIsNotNone(lane_free, "no MEMWATCH_MIN_FREE_GIB default inside the V030 gate")
+        self.assertLessEqual(lane_avail, 3)
+        self.assertLess(lane_free, 1.5)
 
     def test_new_knobs_beat_dotenv(self):
         snapshot = re.search(r"_ENV_SNAPSHOT_VARS=\((.*?)\)", START.read_text(), re.S).group(1).split()
         for name in ("V030", "V030_KV_GIB", "IMAGE", "PLE_GIB", "MEMWATCH_MIN_GIB", "MEMWATCH_MIN_FREE_GIB",
-                     "MTP_DISABLE_BLOCK_DROP"):
+                     "MTP_DISABLE_BLOCK_DROP", "V030_INDEXER_LOGITS_MB"):
             self.assertIn(name, snapshot)
+
+    def test_wrapper_leaves_indexer_cap_to_dotenv(self):
+        # An export here would pass through start.sh's snapshot as an environment
+        # value and override .env; start.sh owns the default.
+        self.assertNotIn("V030_INDEXER_LOGITS_MB", WRAPPER.read_text())
 
 
 LANE_LOADER = REPO / "scripts" / "launch-lane.sh"

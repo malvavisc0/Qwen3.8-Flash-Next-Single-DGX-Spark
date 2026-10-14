@@ -6,6 +6,32 @@ one DGX Spark this repo is written for — treat them as that host's numbers, no
 as promises.
 
 
+## 2026-10-14
+
+### Fixed
+
+- **PLE table build mounts the HF hub directory, not just the model path**
+  (PR #87, jmutter-alt). The one-time `build_ple_packed_table.py` container
+  mounted only `$MODEL_PATH` at `/m`. On caches written by newer
+  `huggingface_hub` the real files live in a shared store at
+  `hub/blobs/<xx>/<sha>` and the per-model `blobs/` entries are symlinks such
+  as `../../blobs/c4/c4c8…`, whose targets are outside the mounted directory:
+  the links dangled inside the container and the build could not read the
+  checkpoint. The build now mounts `$(dirname "$MODEL_PATH")` at `/mhub` and
+  addresses the snapshot as `/mhub/<model>/$SNAPSHOT_REL`; older flat caches
+  resolve the same way. Only the read-only, CPU-only, one-time build container
+  changes.
+- **Archive prune survives an empty `logs/archive` on the first run** —
+  already fixed here with `{ ls … || true; }` before `tail` (the 2026-09-24
+  launcher entry); upstream PR #55 (fyesilova) fixed the same pipefail abort
+  with `done || true`. No code change was needed; recorded for credit.
+
+## 2026-09-30
+
+### Fixed
+
+- **Draft vocab size report** (PR #89, SashaMIT). `build_draft_vocab.py --report-only` counted a size as pinned ids plus the first `size - pinned` ranked ids. A pinned id that is also frequent was counted in both, so the printed coverage was for a smaller vocabulary than `--size` would write. The report now uses the same selection as the file.
+
 ## 2026-09-28
 
 ### Added
@@ -30,6 +56,30 @@ as promises.
   53.0–54.8 across all nine boots (~flat, the 0.22→0.31 GiB draft-head cost).
   Gain ordering tracks held-out coverage exactly. See the README section for
   the full protocol and the accepted/draft capture caveat.
+
+## 2026-09-26
+
+### Fixed
+
+- **`start-v030.sh` caps the QSA indexer's prefill logits buffer at 128 MiB**
+  (`V030_INDEXER_LOGITS_MB`, vLLM's `VLLM_SPARSE_INDEXER_MAX_LOGITS_MB`;
+  PR #79, Antonio Cue Gervas, written by Claude). Since vllm#54915 the indexer
+  sizes that buffer by the batch's longest context, one fresh allocation per
+  call, and PyTorch's caching allocator keeps every earlier size. A cold
+  prompt that takes the context from A to L tokens, where A is the longest
+  context already prefilled since the engine started, keeps about (L² − A²)/2
+  bytes that nothing returns while serving; the profile run skips attention
+  and never allocates the buffer. Measured on one GB10 at `V030_KV_GIB=12`
+  with 19 GiB available idle and memwatch at an 8 GiB floor: +6.8 GiB kept
+  by the end of a 180k prompt (A was about 134k, a free block absorbed the
+  smaller sizes), +11.3 GiB in total by about 205k of a 250k prompt, where
+  memwatch stopped the engine at 6.6 GiB available. The default lane is
+  unaffected: the pinned image's QSA scoring works in fixed 128 MiB chunks
+  over the full block table. With the cap, the first 185k prompt after a boot
+  raised the driver figure by 1.4 GiB once, and the 222k and 259k prompts
+  after it moved it by at most 32 MiB; prefill 2,303 and 2,424 tok/s at 222k
+  and 259k, against 2,357 at 180k without the cap. The cap does not act
+  below 64k of context at 2,048 batched tokens.
 
 ## 2026-09-25
 
